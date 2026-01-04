@@ -1,0 +1,150 @@
+Design Paste Bin::
+
+Functional Requirements-
+-User should be authenticated (Allow anonymous pastes)
+-User should be able to paste text in the file and generate link
+-Should be able to access a given link
+-Expiry Time (Deafult / User's choice) -> Both options available
+-Is link public or private (User controlled) -> All pastes are public
+-Is the pasted content editable/removable -> Not editable but removable
+
+Non-Functional Requirements-
+-How many reads/writes per day? -> Let's assume 1 million new pastes per day
+-(CAP Theorem) -> Availablility
+-Scalable
+-Reliable
+-low latency -> <200ms
+-Read heavy/ Write heavy (Read Heavy) -> The system is read-heavy with a 10:1 read-to-write ratio, so 10 million reads per day
+
+Back Of The Envelope-
+-Storage: 1M * 10Kb = 10GB/Day
+-BandWidth: 
+    -Write bandwidth: 1M pastes/day * 10 KB / 86,400 seconds ≈ 115 KB/s
+    -Read bandwidth: 10M reads/day * 10 KB / 86,400 seconds ≈ 1.15 MB/s
+-Traffic(QPS): 
+    -Write QPS: 1M / 86,400 ≈ 12 requests/sec
+    -Read QPS: 10M / 86,400 ≈ 115 requests/sec
+    -Peak QPS could be 3-5x, so peak read ~500-600 QPS
+
+
+API Endpoints-
+- POST /api/v1/paste
+    -requst body:
+    {
+        Content,
+        expiryDuration
+    }
+    -reponse: 201 created
+    {
+        pasteId,
+        url,
+        expirationDate
+    }
+
+- GET /api/v1/paste/{pasteId}
+    -response: 200 OK
+    {
+        content,
+        createdAt,
+        expirationDate,
+    }
+
+- DELETE /api/v1/paste/{pasteId}/delete
+    -response:204 No content
+    {
+        pasteId,
+        status
+    }
+
+- PUT /api/v1/paste/{pasteId}/update
+    -requst body:
+        {
+            Content,
+            expiryDuration
+        }
+        -reponse: 200 OK
+        {
+            pasteId,
+            url,
+            expirationDate
+        }
+
+DataBase Schema-
+-Paste Table:
+    -pasteId (PK)
+    -content_Key
+    -expirationDate
+    -createdAt
+
+-UsedKeys:
+    -keyId
+    -used_At
+    
+-UnusedKeys:
+    -keyId
+    -createdAt
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
