@@ -1,0 +1,201 @@
+Instagram System Design::
+
+Questions-
+-Do we allow nested comments?
+-What is the scale?
+-Do we need to have story feature?
+-What is the condition to be called a celebrity
+
+
+Functional Requirements-
+-Users can upload photos and videos
+-Users can follow/unfollow other users
+-Users can view a personalized feed of posts from people they follow
+-Users can like and comment on posts
+-Users can view other users' profiles and their posts
+
+
+Non-Functional Requirements-
+-Scalable
+-CAP Theorem -> Availablility
+-Availablility
+-Durable
+-Low latency -> <200ms
+
+
+Back Of The Envelop-
+-Total user: 500M
+-DAU: 40% -> 200M
+-Average Photo Upload per day: 2
+-Average photo size: 500KB
+-Read Write Ratio: (100:1)
+-Storage:
+    -Total number of photos in a day: 200M * 2 = 400M photos
+    -Total storage for photos in a single day: 400M * 500KB = 200TB/day
+    -Total storage for photos for 5 years: 200TB * 365 * 5 = 365PB
+-Traffic Estimation:
+    -Writes: 400M/86400s= 4600 writes/s
+    -Reads: 4600 * 100 = 460000 reads/s
+
+
+API ENDPOINTS-
+-User Service:
+    -POST /api/v1/users/register
+    -POST /api/v1/users/login
+    -GET /api/v1/users/{userId}
+    -PUT /api/v1/users/{userId}/profile
+    -GET /api/v1/users/{userId}/posts?page={pageNo}&limit={limit}
+
+-Post Service:
+    -POST /api/v1/posts
+        Body: { caption, media_file, location }
+        Returns: { post_id, media_url }
+    -GET /api/v1/posts/{postId}
+    -DELETE /api/v1/posts/{postId}
+
+-Feed Service:
+    -GET /api/v1/feed
+        Returns: [ { post_id, user_id, caption, media_url, 
+                     like_count, comment_count, timestamp } ]
+
+-Social Graph Service:
+    -POST /api/v1/users/{userId}/follow
+    -DELETE /api/v1/users/{userId}/unfollow
+    -GET /api/v1/users/{userId}/followers
+    -GET /api/v1/users/{userId}/following
+    -GET /api/v1/users/approvals
+    -GET /api/v1/users/{approvalId}/approve
+
+
+-Engagement Service:
+    -POST /api/v1/posts/{postid}/like
+    -DELETE /api/v1/posts/{postid}/like
+    -GET /api/v1/posts/like?page={pageNo}&limit={limit}
+    -POST /api/v1/posts/{postid}/comment
+    -GET /api/v1/posts/comments?page={pageNo}&limit={limit}
+
+
+
+Database Schema-
+-Users Table:(PostgreSQL)
+{
+  user_id: UUID (PK)
+  username: VARCHAR(30) UNIQUE
+  email: VARCHAR(100) UNIQUE
+  password_hash: VARCHAR(255)
+  profile_pic_url: VARCHAR(500)
+  bio: TEXT
+  isCelibrity: ENUM('Yes', 'No')
+  created_at: TIMESTAMP
+  follower_count: INT
+  following_count: INT
+}
+
+-Posts Table:(PostgreSQL)
+{
+  post_id: UUID (PK)
+  user_id: UUID (FK -> users)
+  caption: TEXT
+  media_url: VARCHAR(500)
+  media_type: ENUM('photo', 'video')
+  location: VARCHAR(200)
+  created_at: TIMESTAMP
+  like_count: INT
+  comment_count: INT
+}
+Index on: (user_id, created_at)
+
+-Follows Table:(PostgreSQL)
+{
+  follower_id: UUID (FK -> users)
+  followee_id: UUID (FK -> users)
+  created_at: TIMESTAMP
+  PRIMARY KEY (follower_id, followee_id)
+}
+Index on: follower_id
+Index on: followee_id
+
+-Likes Table: (Cassandra - for high write throughput)
+{
+  parent_id: (FK -> {Comment or Post} )
+  parent_type: ENUM('Comment','Like')
+  user_id: UUID
+  created_at: TIMESTAMP
+  PRIMARY KEY (post_id, user_id)
+}
+
+-Comments Table:(PostgreSQL)
+{
+  comment_id: UUID (PK)
+  post_id: UUID (FK -> posts)
+  user_id: UUID (FK -> users)
+  content: TEXT
+  created_at: TIMESTAMP
+}
+Index on: (post_id, created_at)
+
+
+Notifications & Real-time Features-
+-Design a separate Notification Service:
+Architecture:
+-Event Producer: When someone likes/comments, engagement service publishes event to Kafka topic: user_engagement_events
+-Notification Service subscribes to Kafka and:
+    -Checks user notification preferences (is notification enabled?)
+    -Determines notification channels: Push, Email, In-app
+    -Aggregates similar notifications (e.g., "John and 5 others liked your post")
+
+Delivery-
+-Push Notifications: Use Firebase Cloud Messaging (FCM) for Android and Apple Push Notification Service (APNS) for iOS
+-Store device tokens in Redis: device_tokens:{user_id}
+-In-app Notifications: Store in Notifications table and use WebSockets or Server-Sent Events (SSE) for real-time delivery
+
+-Notification Table:(PostgreSQL)
+ {
+  notification_id: UUID
+  user_id: UUID
+  type: ENUM('like', 'comment', 'follow','approval')
+  actor_id: UUID
+  post_id: UUID (nullable)
+  is_read: BOOLEAN
+  created_at: TIMESTAMP
+}
+
+
+Caching Strategy-
+-Feed Cache:
+    -Key: feed:user_id
+    -Value: List of post_ids [sorted by timestamp]
+    -TTL: 30 minutes
+    -Stores pre-computed feeds for users. When user opens app, we fetch from this cache.
+
+-Post Metadata Cache:
+    -Key: post:{post_id}
+    -Value: JSON with post details (caption, media_url, counts)
+    -TTL: 1 hour
+
+-User Profile Cache:
+    -Key: user:{user_id}
+    -Value: JSON with username, bio, profile_pic, follower counts
+    -TTL: 15 minutes
+
+-Media URL Cache (via CDN):
+    -Images/videos cached at CDN edge locations
+    -TTL: 24 hours
+    -Cache-Control headers: max-age=86400
+
+-Social Graph Cache:
+    -Key: followers:{user_id}
+    -Key: following:{user_id}
+    -Value: Set of user_ids
+    -TTL: 1 hour
+
+-Like Status Cache:
+    -Key: post_likes:{post_id}
+    -Value: Set of user_ids who liked
+    -TTL: 10 minutes
+
+
+
+
+
+
