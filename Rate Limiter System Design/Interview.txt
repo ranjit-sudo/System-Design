@@ -1,0 +1,85 @@
+Desing Rate Limiter::
+
+Questions-
+-Is this is going to be client side or server side rate limiter? -> Server side
+-Based on what to limit requests (IP,UserID,API)? -> configurable
+-If different limits for different API? -> Yes
+-Is this for single data center or distributed? -> Distributed
+-What is the scale of this? -> 10 million request/second
+-Is this separate or part of code? -> separate
+-What to do if limit for a request is exceeded? -> return 429 with time left to send next request
+
+
+Functional Requirements-
+-Limit the requests based on (IP,UserID,API).
+-return 429 with time left to send next request
+-Limit different API's with differet limits
+-Should be configurable without code deployment
+
+
+Non-Functional Requirements-
+-Scalable
+-CAP Theorem -> Availablility
+-Eventual Consistency
+-Low latency -> <200ms
+-Fault Tolerance
+
+
+Back Of The Envelop-
+-Total Requests: 10M
+-Unique requests: 1M (Assumption)
+-TTL: 1 minute
+-Request per minute: 100 requests (Assumption)
+-Storage: 1M * 8Bytes(timestamp + metadata ) * 100 = 800 MB/minute
+--If counter approach: 1M * 50Bytes(counter + metadata ) = 50MB
+
+Note-
+-Need in memory storage (as disk based storage will be slow)
+
+
+Architecture-
+
+[Client] 
+    ↓
+[Load Balancer]
+    ↓
+[Rate Limiter Middleware]
+    ↓               ↓
+[Redis Cluster]   [API Servers]
+    ↓
+[Rules Database]
+
+
+Database Schema-
+
+Key: user:123:api:/posts
+Value: {
+    tokens: 80,           # Current tokens available
+    capacity: 100,        # Max tokens
+    refill_rate: 10,      # Tokens per second
+    last_refill_time: 1698745632  # Unix timestamp
+}
+
+
+CREATE TABLE rate_limit_rules (
+    id UUID PRIMARY KEY,
+    rule_name VARCHAR(255) NOT NULL,
+    endpoint_pattern VARCHAR(500),  -- e.g., /api/v1/posts/*
+    limit_type VARCHAR(50),         -- user_id, ip_address, api_key
+    time_window_seconds INT,        -- e.g., 60 for 1 minute
+    max_requests INT,               -- e.g., 100 requests
+    priority INT,                   -- For rule matching order
+    enabled BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP
+);
+
+
+
+
+
+
+
+
+
+
