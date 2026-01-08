@@ -1,0 +1,242 @@
+FaceBook Messenger System Design::
+
+Fuctional Requirements-
+-Send/ Receive messages either 1:1/Group
+-Show online offline Status
+-Allow to send text and media_file
+-Show typing indicator
+-Message search and history
+-Delivery status of message
+-Show notifications
+
+Non-Functional Requirements-
+-High Availablility
+-Durable
+-Eventual Consistency Model
+-Low latency -> <200ms
+-Scalable
+
+
+Back of the Envelop Calculations-
+Traffic Estimation::
+-DAU -> 500M
+-Messages each person sends in average in a day -> 40
+-Total Daily Messages -> 500M * 40 = 20 B/Day
+-Total message per second -> 20B/84600s = 2,30,000 messages/second
+-Peak messages -> 230000 * 3 = 700000 messages/second
+
+Storage Estimation::
+-Ratio of Media:Text -> 20:80
+-Average Text Message Size -> 100 Bytes
+-Average Media Message Size -> 200 KB
+-Total Storage per day -> (16B * 100 Bytes) + (4B * 200KB) = 1.6TB + 800 TB = 81.6TB/Day
+-Yearly Storage - 292PB
+
+Bandwidth Estimation::
+-Peak Incoming -> 700000 * 100 = 70MB (Text only)
+
+
+Database Schema-
+
+Service Discovery Registory {
+     // In Redis (global registry)
+    Key: user:session:{user_id}
+    Value: {
+        ws_server_id: "ws-server-1523",
+        connection_time: timestamp,
+        last_heartbeat: timestamp
+    }
+    TTL: 60 seconds (refreshed by heartbeat)
+}
+
+Group Table {
+    group_id, 
+    group_name,
+    created_at, 
+    admin_users
+}
+
+Group_Members Table {
+    group_id, 
+    user_id, 
+    joined_at, 
+    role
+}
+
+messages_by_conversation {
+    - message_id: UUID
+    - sender_id: UUID (FK)
+    - receiver_id: UUID (null for groups) (FK)
+    - group_id: UUID (null for 1-1) (FK)
+    - message_text: TEXT
+    - media_url: TEXT (if applicable)
+    - message_type: ENUM (TEXT/IMAGE/VIDEO)
+    - created_at: TIMESTAMP
+    - status: ENUM (SENT/DELIVERED/READ)
+    - reply_to_message_id: UUID (for threading) (FK in same table)
+}
+
+WebSocket Handler Architecture {
+    // In-memory on each WS Handler
+    Map<user_id, WebSocket_Connection>
+}
+
+user_privacy_settings {
+  user_id: UUID,
+  show_online_status: ENUM ('everyone', 'contacts', 'nobody'),
+  show_last_seen: BOOLEAN,
+  show_read_receipts: BOOLEAN
+}
+
+
+HLD-
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           CLIENT LAYER                                  │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐             │
+│  │ iOS Client   │    │ Android      │    │ Web Client   │             │
+│  │              │    │ Client       │    │ (React)      │             │
+│  └──────────────┘    └──────────────┘    └──────────────┘             │
+│         │                   │                    │                      │
+│         └───────────────────┴────────────────────┘                      │
+│                             │                                           │
+│              [HTTPS/WebSocket - TLS 1.3 Encrypted]                     │
+└─────────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         LOAD BALANCER LAYER                             │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │  L7 Load Balancer (NGINX/HAProxy)                               │  │
+│  │  - SSL Termination                                               │  │
+│  │  - WebSocket Upgrade Support                                     │  │
+│  │  - Sticky Sessions (Consistent Hashing)                         │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────┘
+              │                                   │
+              │ [HTTP/2]                          │ [WebSocket - WSS]
+              ▼                                   ▼
+┌───────────────────────────┐     ┌──────────────────────────────────────┐
+│    API GATEWAY LAYER      │     │   WEBSOCKET HANDLER LAYER            │
+│  ┌─────────────────────┐  │     │  ┌────────────────────────────────┐ │
+│  │ API Gateway         │  │     │  │ WebSocket Handlers (Stateful)  │ │
+│  │ - Authentication    │  │     │  │ - 50K connections/server       │ │
+│  │ - Rate Limiting     │  │     │  │ - Heartbeat: 30s interval      │ │
+│  │ - Request Routing   │  │     │  │ - Protocol: WebSocket (RFC6455)│ │
+│  └─────────────────────┘  │     │  │ - Bidirectional: Full Duplex   │ │
+│       │ [gRPC/HTTP2]      │     │  └────────────────────────────────┘ │
+│       ▼                    │     │           │                          │
+└───────────────────────────┘     │           │ [Internal: gRPC]         │
+                                   └───────────────────────────────────────┘
+                                               │
+                                               ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         SERVICE LAYER                                   │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌────────────┐ │
+│  │   Message    │  │   Presence   │  │    Media     │  │   User     │ │
+│  │   Service    │  │   Service    │  │   Service    │  │  Service   │ │
+│  │              │  │              │  │              │  │            │ │
+│  │ [Stateless]  │  │ [Stateless]  │  │ [Stateless]  │  │[Stateless] │ │
+│  └──────────────┘  └──────────────┘  └──────────────┘  └────────────┘ │
+│         │                 │                  │                │         │
+│         │ [TCP/IP]        │ [Redis Protocol] │ [HTTP/S3 API]  │ [gRPC] │
+│         ▼                 ▼                  ▼                ▼         │
+└─────────────────────────────────────────────────────────────────────────┘
+            │
+            ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        MESSAGE QUEUE LAYER                              │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │  Apache Kafka Cluster                                            │  │
+│  │  - Topic: messages (1000 partitions)                            │  │
+│  │  - Partition Key: conversation_id                               │  │
+│  │  - Replication Factor: 3                                        │  │
+│  │  - Protocol: Kafka Binary Protocol (TCP)                        │  │
+│  │  - Retention: 7 days                                            │  │
+│  │  - Acks: all (wait for all replicas)                          │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                     [Kafka Consumer API]                                │
+└─────────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      PERSISTENCE LAYER                                  │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────────────┐   │
+│  │   Cassandra     │  │  Elasticsearch  │  │   PostgreSQL         │   │
+│  │   Cluster       │  │   Cluster       │  │   (User/Group Data)  │   │
+│  │                 │  │                 │  │                      │   │
+│  │ - Messages      │  │ - Search Index  │  │ - Users              │   │
+│  │ - Conversations │  │ - Full Text     │  │ - Groups             │   │
+│  │ - Read Receipts │  │   Search        │  │ - Relationships      │   │
+│  │                 │  │                 │  │                      │   │
+│  │ Protocol: CQL   │  │ Protocol: HTTP  │  │ Protocol: PostgreSQL │   │
+│  │ (Cassandra      │  │ REST API        │  │ Wire Protocol        │   │
+│  │  Wire Protocol) │  │                 │  │ (TCP)                │   │
+│  │ Port: 9042      │  │ Port: 9200      │  │ Port: 5432           │   │
+│  │                 │  │                 │  │                      │   │
+│  │ Consistency:    │  │                 │  │ ACID Compliant       │   │
+│  │ QUORUM (R+W>N)  │  │                 │  │                      │   │
+│  └─────────────────┘  └─────────────────┘  └──────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         CACHE LAYER                                     │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │  Redis Cluster                                                   │  │
+│  │                                                                   │  │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌─────────────────────┐   │  │
+│  │  │ Session      │  │ Recent       │  │ Typing Indicators   │   │  │
+│  │  │ Registry     │  │ Messages     │  │ & Presence          │   │  │
+│  │  │              │  │ Cache        │  │                     │   │  │
+│  │  │ Key: user:   │  │ Key: conv:   │  │ Key: typing:conv:   │   │  │
+│  │  │ {user_id}    │  │ {conv_id}    │  │ {conversation_id}   │   │  │
+│  │  │              │  │              │  │                     │   │  │
+│  │  │ TTL: 60s     │  │ TTL: 1hr     │  │ TTL: 5s             │   │  │
+│  │  └──────────────┘  └──────────────┘  └─────────────────────┘   │  │
+│  │                                                                   │  │
+│  │  Protocol: RESP (Redis Serialization Protocol)                  │  │
+│  │  Port: 6379                                                      │  │
+│  │  Pub/Sub: Channel per WebSocket server                          │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      MEDIA STORAGE & CDN                                │
+│  ┌─────────────────┐                    ┌─────────────────────────┐    │
+│  │ Cloud Storage   │                    │    CDN (CloudFlare)     │    │
+│  │ (S3/GCS)        │                    │                         │    │
+│  │                 │ [Origin Fetch:     │  - Edge Locations       │    │
+│  │ - Images        │  HTTPS]            │  - Cache TTL: 30 days   │    │
+│  │ - Videos        │◄───────────────────│  - Gzip Compression     │    │
+│  │ - Files         │                    │  - DDoS Protection      │    │
+│  │                 │                    │                         │    │
+│  │ Pre-signed URLs │                    │  Protocol: HTTPS        │    │
+│  │ (Direct Upload) │                    │  (HTTP/2, HTTP/3)       │    │
+│  │                 │                    │                         │    │
+│  │ Protocol: S3    │                    └─────────────────────────┘    │
+│  │ API (HTTPS)     │                               ▲                    │
+│  └─────────────────┘                               │                    │
+│          ▲                                          │                    │
+│          │ [Pre-signed URL Upload]      [CDN Fetch: HTTPS/2]           │
+│          │                                          │                    │
+│    ┌─────┴────────┐                                │                    │
+│    │ Media Service│                                │                    │
+│    │ (Transcoder) │                                │                    │
+│    └──────────────┘                                │                    │
+└─────────────────────────────────────────────────────────────────────────┘
+                                                     │
+                                                     │
+                                              Back to Clients
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      OBSERVABILITY LAYER                                │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                 │
+│  │ Prometheus   │  │     ELK      │  │    Jaeger    │                 │
+│  │ (Metrics)    │  │   (Logs)     │  │  (Tracing)   │                 │
+│  │              │  │              │  │              │                 │
+│  │ - Pull model │  │ - Log        │  │ - Distributed│                 │
+│  │ - Grafana    │  │   aggregation│  │   tracing    │                 │
+│  │   dashboard  │  │ - Kibana     │  │ - Span ID    │                 │
+│  │              │  │   queries    │  │   tracking   │                 │
+│  └──────────────┘  └──────────────┘  └──────────────┘                 │
+└─────────────────────────────────────────────────────────────────────────┘

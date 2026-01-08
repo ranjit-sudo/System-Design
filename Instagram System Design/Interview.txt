@@ -6,7 +6,7 @@ Questions-
 -Do we need to have story feature?
 -What is the condition to be called a celebrity
 
-
+ 
 Functional Requirements-
 -Users can upload photos and videos
 -Users can follow/unfollow other users

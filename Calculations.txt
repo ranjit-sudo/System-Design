@@ -1,0 +1,20 @@
+Memory Unit Conversions-
+    1 Kilobyte (KB)   = 10^3 bytes         ≈ 1,000 bytes
+    1 Megabyte (MB)   = 10^6 bytes         ≈ 1 million bytes
+    1 Gigabyte (GB)   = 10^9 bytes         ≈ 1 billion bytes
+    1 Terabyte (TB)   = 10^12 bytes        ≈ 1 trillion bytes
+    1 Petabyte (PB)   = 10^15 bytes        ≈ 1,000 TB
+
+Conversion Metric-
+    1000 KB = 1 MB
+    1000 MB = 1 GB
+    1000 GB = 1 TB
+    1000 TB = 1 PB
+
+User Scale Conversion-
+    1 Thousand       = 10^3      = 1K
+    1 Million        = 10^6      = 1M
+    1 Billion        = 10^9      = 1B
+    1 Trillion       = 10^12     = 1T
+
+
